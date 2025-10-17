@@ -14,7 +14,7 @@ The script automates the CLEANED modeling workflow to:
 - Generate results as both Excel workbooks and JSON outputs.  
 - Compute enteric methane (CH₄) intensity per kilogram of Fat- and Protein-Corrected Milk (FPCM).
 
-This allows comparison of baseline versus improved feed basket scenarios and quantifies changes in emissions efficiency across 230+ farms.
+This allows comparison of baseline versus improved feed basket scenarios and quantifies changes in emissions efficiency across multiple farms.
 
 ---
 
