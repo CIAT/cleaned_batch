@@ -1,6 +1,6 @@
 # CLEANED Batch Emissions Calculator (Venture37)
 
-This repository provides an automated workflow to estimate livestock greenhouse gas (GHG) emissions using the **CLEANED** (Comprehensive Livestock Environmental Assessment) framework. It was developed for Venture37 Kenya data and is designed to scale cleaned to bacth process datasets from multiple farms.
+This repository provides an automated workflow to estimate livestock greenhouse gas (GHG) emissions using the **CLEANED** (Comprehensive Livestock Environmental Assessment) framework. It was developed for Venture37 Kenya data and is designed to scale cleaned to batch process datasets from multiple farms.
 
 ---
 
