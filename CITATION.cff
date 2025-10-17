@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "CLEANED Batch Emissions Calculator"
+version: "1.0.0"
+date-released: "2025-10-17"
+authors:
+  - family-names: "Steward"
+    given-names: "Pete"
+    affiliation: "Alliance of Bioversity International and CIAT (CGIAR)"
+    email: "p.steward@cgiar.org"
+    orcid: "https://orcid.org/0000-0003-3985-4911"
+  - family-names: "Mwema"
+    given-names: "Emmanuel"
+    affiliation: "Alliance of Bioversity International and CIAT (CGIAR)"
+    email: "e.mwema@cgiar.org"
+    orcid: "https://orcid.org/0000-0002-8292-2230"
+keywords:
+  - CLEANED
+  - livestock
+  - greenhouse-gas
+  - methane
+  - FPCM
+  - emissions
+  - CGIAR
+  - SAAFS
+abstract: >
+  Automates CLEANED-based GHG assessment for livestock farms using Venture37
+  survey data. Processes multiple Excel files, computes emissions and CH₄
+  intensity per kg of Fat- and Protein-Corrected Milk (FPCM), and outputs
+  standardized Excel/JSON results. Enables partners to evaluate feed improvement
+  impacts across farms at scale.
+repository-code: "https://github.com/CIAT/cleaned_batch"
+license: "MIT"
+type: software
+url: "https://github.com/CIAT/cleaned_batch"
+doi: 10.5281/zenodo.xxxxxxx  # Replace with actual Zenodo DOI once available
+funding:
+  - name: "CGIAR Sustainable Animal and Aquatic Food Systems (SAAFS) Program"
+    identifier: "CGIAR-SAAFS-2025"
+    type: "CGIAR Program"
