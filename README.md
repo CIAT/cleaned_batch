@@ -32,10 +32,8 @@ This allows comparison of baseline versus improved feed basket scenarios and qua
 
 | File | Description |
 |------|--------------|
-| `cleaned_batch_emissions_fpcm.R` | Main script to execute full workflow. |
-| `R/` | CLEANED component scripts (feed quality, energy, land, nitrogen, etc.). |
-| `data/v37/` | Input Excel data (baseline and improved feed scenarios). |
-| `outputs/` | Generated Excel and JSON results. |
+| `R/cleaned_batch_emissions_fpcm.R` | Main script to execute full workflow. |
+| `data/v37/` | Input Excel data (baseline and improved feed scenarios) you will need to add this manually. |
 
 ---
 
