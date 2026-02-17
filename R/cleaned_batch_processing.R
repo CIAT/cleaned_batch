@@ -90,7 +90,7 @@ files <- c(
   "water_requirement.R",
   "season_length.R",
   "soc.R",
-  "ghg_emission.R",
+  # "ghg_emission.R",
   "ghg_emission_v2.R",
   "compare_scenario.R",
   "differences.R",
@@ -111,8 +111,8 @@ for (f in files) {
 
 # We operate on multiple Venture37 Excel workbooks. Name them for scenario tags.
 # Set the location of the folder that contains the v37 input data
-input_files <- file.path("data/v37", c("Kenya NPA data.xlsx", "NPA_Kenya_April2025.xlsx"))
-names(input_files) <- c("baseline", "apr_2025")
+input_files <- file.path("data/v37", c("Kenya NPA data.xlsx", "NPA_Kenya_April2025.xlsx","NPA_Ethiopia_baseline.xlsx","NPA_Ethiopia_midline.xlsx"))
+names(input_files) <- c("kenya_baseline", "kenya_apr_2025","ethiopia_baseline","ethiopia_midline")
 
 # Toggle verbose progress (TRUE prints farm/herd progress lines)
 messages <- F
@@ -143,6 +143,7 @@ ef<-lapply(1:length(input_files),function(ii){
   v37_feed_type<-unique(data.table(readxl::read_excel(file,sheet="feed_type")))[order(feed_type_code)]
   
   # Deal with duplicate entry for feed_type_code == 5 (Brachiaria)
+  
   x<-v37_feed_type[feed_type_code==5][, feed_type_name := "Brachiaria"]
   by_cols<-colnames(x)[1:5]
   num_cols<-colnames(x)[!colnames(x) %in% by_cols]
@@ -238,30 +239,30 @@ ef<-lapply(1:length(input_files),function(ii){
   colnames(template$livestock)
   
   feed_items<-data.table(template$feed_items)
-  fertilizer<-data.table(template$fertilizer)[0,]
-  fertilizer<-NULL
+  #fertilizer<-data.table(template$fertilizer)[0,]
+  #fertilizer<-NULL
   
-  ## 1.4) ERA feed tables ####
-  # List files in the specified S3 bucket and prefix
-  
-  s3<-s3fs::S3FileSystem$new(anonymous = T)
-  
-  files_s3<-suppressWarnings(s3$dir_ls("s3://digital-atlas/era/data"))
-  files_s3<-files_s3[grepl("ERA_nutrition_library",files_s3)]
-  files_local<-file.path("data",basename(files_s3))
-  
-  if(!file.exists(files_local)){
-    s3$file_download(files_s3,files_local)
-  }
-  
-  era_feeds <- data.table(readxl::read_excel(files_local,sheet=2))
-  era_feeds <- era_feeds[!is.na(DC.Value) & DC.Value!="NA" &
-                           DC.Variable %in% c("DM",'CP',"ME") &
-                           !nutrition_source %in% c("feedipedia","ilri")]
-  
-  ### 1.5.1) (Not Run) Map ERA feeds to feed_items ####
-  # Not Run - in development
+  ## 1.4) ERA feed tables (Not Run) ####
   if(F){
+    # List files in the specified S3 bucket and prefix
+    
+    s3<-s3fs::S3FileSystem$new(anonymous = T)
+    
+    files_s3<-suppressWarnings(s3$dir_ls("s3://digital-atlas/era/data"))
+    files_s3<-files_s3[grepl("ERA_nutrition_library",files_s3)]
+    files_local<-file.path("data",basename(files_s3))
+    
+    if(!file.exists(files_local)){
+      s3$file_download(files_s3,files_local)
+    }
+    
+    era_feeds <- data.table(readxl::read_excel(files_local,sheet=2))
+    era_feeds <- era_feeds[!is.na(DC.Value) & DC.Value!="NA" &
+                             DC.Variable %in% c("DM",'CP',"ME") &
+                             !nutrition_source %in% c("feedipedia","ilri")]
+    
+    ### 1.5.1) (Not Run) Map ERA feeds to feed_items ####
+    # Not Run - in development
     for(i in 1:nrow(v37_feed_items_merge)){
       era_code<-v37_feed_items_merge[i,era_code]
       is_dry<-v37_feed_items_merge[i,feed_is_dm]
@@ -274,7 +275,6 @@ ef<-lapply(1:length(input_files),function(ii){
       }
     }
   }
-  
   
   ## 1.5) ILRI feed tables ####
   
@@ -316,7 +316,7 @@ ef<-lapply(1:length(input_files),function(ii){
   ### 1.5.1) Map ILRI feeds to feed_items ####
   v37_fdb_codes<-unique(v37_feed_items_merge[!is.na(ilri_fdb_code),.(country,ilri_fdb_code)])
   
-  min_samples<-1
+  min_samples<-5
   
   ilri_fdb_subset<-rbindlist(lapply(1:nrow(v37_fdb_codes),function(i){
     feed_code<-unlist(strsplit(v37_fdb_codes$ilri_fdb_code[i],";"))
@@ -440,7 +440,8 @@ ef<-lapply(1:length(input_files),function(ii){
   colnames(feed_items)[!colnames(feed_items) %in% colnames(v37_feed_items_merge)]
   
   # Enforce numeric class
-  num_cols<-c("slope_p_factor","slope_length")
+  char_cols<-c("slope_desc","water_regime","cultivation_period","ecosystem_type","organic_amendment")
+  num_cols<-names(feed_fixed)[!names(feed_fixed) %in% char_cols]
   v37_feed_items_merge[, (num_cols) := lapply(.SD, as.numeric), .SDcols = num_cols]
   
   ## 2.3) Seasons #####
@@ -456,7 +457,7 @@ ef<-lapply(1:length(input_files),function(ii){
   }
   
   # Remove farms with duplicate livetypes in the feed basket
-  unique(v37_feed_basket[,.(N=.N),by=.(Ids,livetype_code,livetype_desc,feed_type_code)][N>1][order(Ids),!"feed_type_code"])
+  unique(v37_feed_basket[,.(N=.N),by=.(Ids,livetype_code,livetype_desc,feed_type_code,feed_item_code)][N>1][order(Ids),!"feed_type_code"])
   
   farm_paras<-lapply(1:length(farms),FUN=function(i){
     farm<-farms[i]
@@ -475,7 +476,7 @@ ef<-lapply(1:length(input_files),function(ii){
       # Subset herds
       herd_1<-livestock_37[j]
       
-      cat("\r farm id", farm, "i =", i, "/", length(farms), "herd (j) =",herd_1$livetype_code,herd_1$livetype_desc_v37, j, "/", nrow(livestock_37))
+      cat("\r farm id", farm, "i =", i, "/", length(farms), "herd (j) =",herd_1$livetype_code,herd_1$livetype_desc_v37, j, "/", nrow(livestock_37),"                      ")
       
       # Merge lkp_livetype
       l_code<-herd_1$livetype_code
@@ -672,8 +673,17 @@ ef<-lapply(1:length(input_files),function(ii){
     
     tab_names<-names(ghg_farm_updated[[1]])
     ghg_farm_merged<-lapply(tab_names,FUN=function(tab_name){
+      # print(tab_name)
       x<-lapply(ghg_farm_updated,"[[",tab_name)
-      x<-rbindlist(x)
+      if(tab_name %in% c("fetilizer_ghg","fertilizer_ghg")){
+        x1<-lapply(x,"[[","fertilizer_applied")
+        x2<-lapply(x,"[[","fertlizer_emission_by_crop")
+        x1<-rbindlist(x1)
+        x2<-rbindlist(x2)
+        x<-list(fertilizer_applied=x1,fertlizer_emission_by_crop=x2)
+      }else{
+        x<-rbindlist(x)
+      }
       x
     })
     
@@ -686,8 +696,17 @@ ef<-lapply(1:length(input_files),function(ii){
   tab_names<-names(ghg_emissions_merge[[1]])
   
   ghg_emissions_merge_all<-lapply(tab_names,FUN=function(tab_name){
-    x<-lapply(ghg_emissions_merge,"[[",tab_name)
-    x<-rbindlist(x)
+    if(tab_name %in% c("fetilizer_ghg","fertilizer_ghg")){
+      x<-lapply(ghg_emissions_merge,"[[",tab_name)
+      x1<-lapply(x,"[[","fertilizer_applied")
+      x2<-lapply(x,"[[","fertlizer_emission_by_crop")
+      x1<-rbindlist(x1)
+      x2<-rbindlist(x2)
+      x<-list(fertilizer_applied=x1,fertlizer_emission_by_crop=x2)
+    }else{
+      x<-lapply(ghg_emissions_merge,"[[",tab_name)
+      x<-rbindlist(x)
+    }
     x
   })
   names(ghg_emissions_merge_all)<-tab_names
@@ -718,8 +737,18 @@ ef<-lapply(1:length(input_files),function(ii){
   
   # Loop through the list and add each data.frame as a sheet
   for (sheet_name in names(ghg_emissions_merge_all)) {
-    addWorksheet(wb, sheet_name)
-    writeData(wb, sheet = sheet_name, x = ghg_emissions_merge_all[[sheet_name]])
+    print(sheet_name)
+    if(sheet_name %in% c("fetilizer_ghg","fertilizer_ghg")){
+      x<-ghg_emissions_merge_all[[sheet_name]]
+      addWorksheet(wb, "fertilizer_applied")
+      writeData(wb, sheet = "fertilizer_applied", x = x$fertilizer_applied)
+      
+      addWorksheet(wb, "fertlizer_emission_by_crop")
+      writeData(wb, sheet = "fertlizer_emission_by_crop", x = x$fertlizer_emission_by_crop)
+    }else{
+      addWorksheet(wb, sheet_name)
+      writeData(wb, sheet = sheet_name, x = ghg_emissions_merge_all[[sheet_name]])
+    }
   }
   
   ## 4.2) Save and return results ####
