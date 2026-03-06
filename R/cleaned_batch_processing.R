@@ -121,7 +121,7 @@ messages <- F
 # For each workbook: ingest -> harmonize -> build CLEANED input objects per herd
 # -> run the CLEANED pipeline -> write Excel & JSON -> return EF table.
 
-# Should we map to ILRI feed tables
+# Should we derive nutritional feed information from ILRI feed tables?
 use_ilri_feeds<-F
 
 ef<-lapply(1:length(input_files),function(ii){
@@ -220,14 +220,12 @@ ef<-lapply(1:length(input_files),function(ii){
       ### 1.1.3) Feed types ####
       v37_feed_type<-unique(data.table(readxl::read_excel(file,sheet="feed_type")))[order(feed_type_code)]
       
-      # Deal with duplicate entry for feed_type_code == 5 (Brachiaria)
-       x<-v37_feed_type[feed_type_code==5][, feed_type_name := "Brachiaria"]
-      by_cols<-c("feed_type_code","feed_type_name","category","grassman_desc","grassman_change_factor")
-      num_cols<-colnames(x)[!colnames(x) %in% by_cols]
-      
-      x <- x[, lapply(.SD, mean), by = by_cols, .SDcols = num_cols]
-      
-      v37_feed_type<-rbind(v37_feed_type[feed_type_code!=5],x)
+       # Not Run (should be flagged as error and fixed in sheet) Deal with duplicate entry for feed_type_code == 5 (Brachiaria)
+       #x<-v37_feed_type[feed_type_code==5][, feed_type_name := "Brachiaria"]
+       #by_cols<-c("feed_type_code","feed_type_name","category","grassman_desc","grassman_change_factor","water_regime")
+       #num_cols<-colnames(x)[!colnames(x) %in% by_cols]
+       #x <- x[, lapply(.SD, mean), by = by_cols, .SDcols = num_cols]
+       #v37_feed_type<-rbind(v37_feed_type[feed_type_code!=5],x)
       
       # Check required cols are present
       required_cols <- c(
@@ -246,7 +244,11 @@ ef<-lapply(1:length(input_files),function(ii){
         "residue_n",
         "kc_initial",
         "kc_midseason",
-        "kc_late"
+        "kc_late",
+        "water_regime",
+        "ecosystem_type",
+        "organic_amendment",
+        "cultivation_period"
       )
       
       # Check presence in v37_feed_type (data.table)
@@ -270,6 +272,13 @@ ef<-lapply(1:length(input_files),function(ii){
         message("Note: v37_feed_type has additional columns: ", paste(extra_cols, collapse = ", "))
       }
       
+      # Check for duplicate feed type
+      type_dups<-v37_feed_type[,.N,by=feed_type_code][N>1]
+      if(nrow(type_dups)>0){
+        print(type_dups)
+        stop("Duplicates codes in feed_type table")
+      }
+      
       # V37 - Merge feed_items & feed type
       v37_feed_items_merge<-merge(v37_feed_items,v37_feed_type,by="feed_type_code",all.x=T)
       
@@ -281,6 +290,7 @@ ef<-lapply(1:length(input_files),function(ii){
         print(check)
       }
       
+
       
       ### 1.1.4) Feed basket ####
       v37_feed_basket <- data.table(readxl::read_excel(file,sheet="Feedproportions"))
@@ -329,6 +339,8 @@ ef<-lapply(1:length(input_files),function(ii){
                             variable.name = "feed_item_code",
                             value.name = "allocation")
       
+      v37_feed_basket[,feed_item_code:=as.numeric(as.character(feed_item_code))]
+      
       v37_feed_basket<-v37_feed_basket[allocation!=0][order(Ids,livetype_code)
       ][,total:=sum(allocation),by=.(Ids,livetype_code,livetype_desc)]
       
@@ -340,8 +352,7 @@ ef<-lapply(1:length(input_files),function(ii){
       }
       
       # Normalize types
-      v37_feed_basket<-v37_feed_basket[,.(Ids,livetype_code,livetype_desc,feed_item_code,allocation)
-      ][,feed_item_code:=as.numeric(as.character(feed_item_code))]
+      v37_feed_basket<-v37_feed_basket[,.(Ids,livetype_code,livetype_desc,feed_item_code,allocation)]
       
       # If survey captured proportions as 0–1, scale to percentages (0–100)
       if(v37_feed_basket[,!max(allocation>10)]){
@@ -358,7 +369,7 @@ ef<-lapply(1:length(input_files),function(ii){
         print(check)
       }
       
-      ### 1.1.5) Simple field parameters ####
+      ### 1.1.5) Fixed field parameters ####
       v37_simple_fields<-data.table(readxl::read_excel(file,sheet="simple_fields"))
       
       # Check required fields are present      
@@ -456,12 +467,10 @@ ef<-lapply(1:length(input_files),function(ii){
     ## 1.3) Load input template #####
     file<-"https://raw.githubusercontent.com/CIAT/icleaned/refs/heads/staging/data/shared_folder/study_objects/Study_2.json"
     template <- fromJSON(file)
-    colnames(template$livestock)
-    
+
     feed_items<-data.table(template$feed_items)
     fertilizer<-data.table(template$fertilizer)[0,]
-    #fertilizer<-NULL
-    
+
     ## 1.4) ERA feed tables (Not Run) ####
     if(F){
       # List files in the specified S3 bucket and prefix
@@ -578,107 +587,129 @@ ef<-lapply(1:length(input_files),function(ii){
     }
   # 2) Set "fixed" parameters ####
   
-      ## 2.0) "Simple" fields #####
-      template_names<-data.table(field_name=names(template),
-                                 class=sapply(template,base::class),
-                                 length=sapply(template,length))
-      
-      simple_field_names<-template_names[length==1,field_name]
-      
-      simple_fields<-template[simple_field_names]
-      
-      for(i in 1:length(simple_fields)){
-        field<-names(simple_fields)[i]
-        simple_fields[field]<-v37_simple_fields[field_name==field,value]
-      }
-      
-      
-      ## 2.1) Livestock #####
-      mm_code<-"storage"
-      mm_des<-lkp_manureman[manureman_code==mm_code,manureman_desc]
-      
-      mm_code2<-"pasture"
-      mm_des2<-lkp_manureman[manureman_code==mm_code2,manureman_desc]
-      
-      livestock_fixed<-data.frame(
-        manureman_stable=mm_des,
-        manureman_onfarm_grazing=mm_des2,
-        manureman_non_roofed_enclosure=0,
-        manureman_offfarm_grazing=mm_des2,
-        annual_growth=0,
-        annual_wool=0,
-        manure_in_stable=1,
-        manure_in_non_roofed_enclosure=0,
-        manure_in_field=0,
-        manure_onfarm_fraction=0,
-        manure_sales_fraction=0,
-        body_weight_weaning=0,
-        body_weight_year_one=0,
-        adult_weight=600,
-        work_hour=0,
-        piglets_relying_on_milk=0
-      )
-      
-      ## 2.2) Feed_Items #####
-      feed_fixed<-c(
-        slope=1,
-        slope_desc="Flat (0-5%)",
-        slope_p_factor=0.11,
-        slope_length=15,
-        water_regime=0,
-        n_content=0,
-        cultivation_period=0,
-        ecosystem_type=0,
-        organic_amendment=0,
-        cut_carry_fraction=0,
-        fraction_as_fertilizer=0, # Needs to be distributed by crop
-        fraction_as_manure=0, # Needs to be distributed by crop
-        n_fertilizer=0,
-        urea=0,
-        npk=0,
-        dap=0,
-        ammonium_nitrate=0,
-        ammonium_sulfate=0,
-        n_solutions=0,
-        ammonia=0,
-        time_horizon=0
-      )
-      
-      fi_cols<-colnames(feed_items)
-      zero_cols<-fi_cols[grep("trees|dbh|diameter_",fi_cols)]
-      names(zero_cols)<-zero_cols
-      zero_cols[1:length(zero_cols)]<-0
-      feed_fixed<-c(feed_fixed,zero_cols)
-      
-       ### 2.2.1)  Add fixed items to input template #####
-      for(k in 1:length(feed_fixed)){
-        variable<-names(feed_fixed)[k]
-        v37_feed_items_merge[,(variable):=feed_fixed[k]]
-      }
-      
-      # Check all cols in template are present
-      colnames(feed_items)[!colnames(feed_items) %in% colnames(v37_feed_items_merge)]
-      
-      # Enforce numeric class
-      char_cols<-c("slope_desc","water_regime","cultivation_period","ecosystem_type","organic_amendment")
-      num_cols<-names(feed_fixed)[!names(feed_fixed) %in% char_cols]
-      v37_feed_items_merge[, (num_cols) := lapply(.SD, as.numeric), .SDcols = num_cols]
-      
-      ## 2.3) Seasons #####
-      season_dat<-data.frame(season_length=180,season_name="season_x")
-      
+    ## 2.0) "Simple" fields #####
+    template_names<-data.table(field_name=names(template),
+                               class=sapply(template,base::class),
+                               length=sapply(template,length))
+    
+    simple_field_names<-template_names[length==1,field_name]
+    
+    simple_fields<-template[simple_field_names]
+    
+    for(i in 1:length(simple_fields)){
+      field<-names(simple_fields)[i]
+      simple_fields[field]<-v37_simple_fields[field_name==field,value]
+    }
+    
+    
+    ## 2.1) Livestock #####
+    mm_code<-"storage"
+    mm_des<-lkp_manureman[manureman_code==mm_code,manureman_desc]
+    
+    mm_code2<-"pasture"
+    mm_des2<-lkp_manureman[manureman_code==mm_code2,manureman_desc]
+    
+    livestock_fixed<-data.frame(
+      manureman_stable=mm_des,
+      manureman_onfarm_grazing=mm_des2,
+      manureman_non_roofed_enclosure=0,
+      manureman_offfarm_grazing=mm_des2,
+      annual_growth=0,
+      annual_wool=0,
+      manure_in_stable=1,
+      manure_in_non_roofed_enclosure=0,
+      manure_in_field=0,
+      manure_onfarm_fraction=0,
+      manure_sales_fraction=0,
+      body_weight_weaning=0,
+      body_weight_year_one=0,
+      adult_weight=600,
+      work_hour=0,
+      piglets_relying_on_milk=0
+    )
+    
+    ## 2.2) Feed_Items #####
+    feed_fixed<-c(
+      slope=1,
+      slope_desc="Flat (0-5%)",
+      slope_p_factor=0.11,
+      slope_length=15,
+      n_content=0,
+      cut_carry_fraction=0,
+      fraction_as_fertilizer=0, # Needs to be distributed by crop
+      fraction_as_manure=0, # Needs to be distributed by crop
+      n_fertilizer=0,
+      urea=0,
+      npk=0,
+      dap=0,
+      ammonium_nitrate=0,
+      ammonium_sulfate=0,
+      n_solutions=0,
+      ammonia=0,
+      time_horizon=0
+    )
+    
+    fi_cols<-colnames(feed_items)
+    zero_cols<-fi_cols[grep("trees|dbh|diameter_",fi_cols)]
+    names(zero_cols)<-zero_cols
+    zero_cols[1:length(zero_cols)]<-0
+    feed_fixed<-c(feed_fixed,zero_cols)
+    
+     ### 2.2.1)  Add fixed items to input template #####
+    for(k in 1:length(feed_fixed)){
+      variable<-names(feed_fixed)[k]
+      v37_feed_items_merge[,(variable):=feed_fixed[k]]
+    }
+    
+    # Check all cols in template are present
+    colnames(feed_items)[!colnames(feed_items) %in% colnames(v37_feed_items_merge)]
+    
+    # Enforce numeric class
+    char_cols<-c("slope_desc","water_regime","cultivation_period","ecosystem_type","organic_amendment")
+    num_cols<-names(feed_fixed)[!names(feed_fixed) %in% char_cols]
+    v37_feed_items_merge[, (num_cols) := lapply(.SD, as.numeric), .SDcols = num_cols]
+    
+    ## 2.3) Seasons #####
+    season_dat<-data.frame(season_length=180,season_name="season_x")
+    
   # 3) Loop through farms ####
+    # Check that there are corresponding entries in feed basket for each livetype and Id ####
+  herd_check<-herd[!grepl("calve|calf",livetype_desc_v37,ignore.case = T)]
+  basket_codes<-unique(v37_feed_basket[,.(Ids,livetype_desc)])[,match:=T]
+  setnames(basket_codes,"livetype_desc","livetype_desc_v37")
+  herd_check<-merge(herd_check,basket_codes,all.x = T)
+  herd_check<-herd_check[is.na(match)]
+  if(nrow(herd_check)>0){
+    cat("Warning message: Missing feed basket information or non-match on livetype_desc field.\n")
+    cat("Herd:\n")
+    print(herd_check[,.(Ids,livetype_desc_v37,livetype_code)])
+    remove_ids<-herd_check[,unique(Ids)]
+    cat("Feedbasket:\n")
+    print(unique(v37_feed_basket[Ids %in% remove_ids,.(Ids,livetype_desc,livetype_code)]))
+    cat("\nFarms removed: Id =",remove_ids)
+    
+    # ---- pause and ask user ----
+    ans <- readline("\nContinue and remove these farms? (y/n): ")
+    
+    if (!tolower(ans) %in% c("y","Y","Yes","yes")) {
+      stop("Execution stopped by user.", call. = FALSE)
+    }else{
+      herd<-herd[!Ids %in% remove_ids]
+    }
+  }
+  
   # unique farm ids
   farms<-na.omit(unique(herd$Ids))
   
-  # Remove farms with no feed basket information ####
-  if(basename(input_files[ii])=="NPA_Kenya_April2025.xlsx"){
-    farms<-farms[!farms %in% c("660094058","660413255")]
-  }
+  # Remove farms with no feed basket information
+  # if(basename(input_files[ii])=="NPA_Kenya_April2025.xlsx"){
+  #  farms<-farms[!farms %in% c("660094058","660413255")]
+  #}
   
   # Remove farms with duplicate livetypes in the feed basket
   unique(v37_feed_basket[,.(N=.N),by=.(Ids,livetype_code,livetype_desc,feed_type_code,feed_item_code)][N>1][order(Ids),!"feed_type_code"])
   
+    # Run loop ####
   farm_paras<-lapply(1:length(farms),FUN=function(i){
     farm<-farms[i]
     
@@ -688,7 +719,7 @@ ef<-lapply(1:length(input_files),function(ii){
     livestock[1,1:ncol(livestock)]<-NA
     
     # Subset v37 data to selected farm
-    livestock_37<-herd[Ids==farm & !grepl("calve",livetype_desc_v37,ignore.case = T)]
+    livestock_37<-herd[Ids==farm & !grepl("calve|calf",livetype_desc_v37,ignore.case = T)]
     
     # Loop through herds on the farm
     paras<-lapply(1:nrow(livestock_37),FUN=function(j){
@@ -696,7 +727,7 @@ ef<-lapply(1:length(input_files),function(ii){
       # Subset herds
       herd_1<-livestock_37[j]
       
-      cat("\r farm id", farm, "i =", i, "/", length(farms), "herd (j) =",herd_1$livetype_code,herd_1$livetype_desc_v37, j, "/", nrow(livestock_37),"                      ")
+      cat("\r farm id = ", farm, "i =", i, "/", length(farms), "| herd =",herd_1$livetype_code,herd_1$livetype_desc_v37, "j =",j, "/", nrow(livestock_37),"                      ")
       
       # Merge lkp_livetype
       l_code<-herd_1$livetype_code
@@ -793,10 +824,10 @@ ef<-lapply(1:length(input_files),function(ii){
   
   names(farm_paras)<-paste0("f",farms)
   
-  # 4) Pass to cleaned functions ####
+  # 4) Loop through cleaned functions ####
   messages<-F
   
-  # ---- helper: run a numbered step with contextual error handling ----
+  # helper: run a numbered step with contextual error handling
   run_step <- function(step_id, step_name, expr, farm_name, i, herd_j, messages = FALSE) {
     tryCatch(
       {
@@ -976,7 +1007,7 @@ ef<-lapply(1:length(input_files),function(ii){
   })
   names(ghg_emissions_merge)<-names(ghg_emissions)
   
-    ## 4.1) Combine tables #####
+    ## 4.10) Combine tables #####
     tab_names<-names(ghg_emissions_merge[[1]])
     
     ghg_emissions_merge_all<-lapply(tab_names,FUN=function(tab_name){
