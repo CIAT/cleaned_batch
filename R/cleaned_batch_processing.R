@@ -964,6 +964,10 @@ ef<-lapply(1:length(input_files),function(ii){
   names(ghg_emissions)<-names(farm_paras)
   
   ## 4.9) Add farm and herd name to tables
+  is_table_like <- function(x) {
+    is.data.frame(x) || data.table::is.data.table(x)
+  }
+  
   ghg_emissions_merge<-lapply(1:length(ghg_emissions),FUN=function(i){
     farm_name<-names(ghg_emissions)[i]
     ghg_farm<-ghg_emissions[[i]]
@@ -978,8 +982,19 @@ ef<-lapply(1:length(input_files),function(ii){
       ghg_herd<-ghg_farm[[j]]
       ghg_herd_updated<-lapply(1:length(ghg_herd),FUN=function(k){
         data<-ghg_herd[[k]]
-        data$farm<-farm_name
-        data$herd<-herd_name
+        
+        if(is_table_like(data)){
+          data$farm<-farm_name
+          data$herd<-herd_name
+        }else{
+          data_names<-names(data)
+          data<-lapply(data,function(x){
+            x$farm<-farm_name
+            x$herd<-herd_name
+            x
+          })
+          names(data)<-data_names
+        }
         return(data)
       })
       names(ghg_herd_updated)<-names(ghg_herd)
@@ -995,6 +1010,7 @@ ef<-lapply(1:length(input_files),function(ii){
         x2<-lapply(x,"[[","fertlizer_emission_by_crop")
         x1<-rbindlist(x1)
         x2<-rbindlist(x2)
+
         x<-list(fertilizer_applied=x1,fertlizer_emission_by_crop=x2)
       }else{
         x<-rbindlist(x)
@@ -1008,24 +1024,61 @@ ef<-lapply(1:length(input_files),function(ii){
   names(ghg_emissions_merge)<-names(ghg_emissions)
   
     ## 4.10) Combine tables #####
-    tab_names<-names(ghg_emissions_merge[[1]])
+  bind_mixed_tables <- function(x_list, main_name = "main") {
+    x_list <- Filter(Negate(is.null), x_list)
     
-    ghg_emissions_merge_all<-lapply(tab_names,FUN=function(tab_name){
-      if(tab_name %in% c("fetilizer_ghg","fertilizer_ghg")){
-        x<-lapply(ghg_emissions_merge,"[[",tab_name)
-        x1<-lapply(x,"[[","fertilizer_applied")
-        x2<-lapply(x,"[[","fertlizer_emission_by_crop")
-        x1<-rbindlist(x1)
-        x2<-rbindlist(x2)
-        x<-list(fertilizer_applied=x1,fertlizer_emission_by_crop=x2)
-      }else{
-        x<-lapply(ghg_emissions_merge,"[[",tab_name)
-        x<-rbindlist(x)
-      }
-      x
-    })
-    names(ghg_emissions_merge_all)<-tab_names
+    if (!length(x_list)) return(NULL)
     
+    # split into direct tables vs nested lists
+    direct_tables <- Filter(is_table_like, x_list)
+    nested_lists  <- Filter(function(x) is.list(x) && !is_table_like(x), x_list)
+    
+    # case 1: only direct tables
+    if (length(direct_tables) > 0 && length(nested_lists) == 0) {
+      return(rbindlist(direct_tables, fill = TRUE, use.names = TRUE))
+    }
+    
+    # case 2: only nested lists
+    if (length(direct_tables) == 0 && length(nested_lists) > 0) {
+      child_names <- unique(unlist(lapply(nested_lists, names)))
+      
+      out <- lapply(child_names, function(nm) {
+        pieces <- lapply(nested_lists, function(x) x[[nm]])
+        pieces <- Filter(Negate(is.null), pieces)
+        rbindlist(pieces, fill = TRUE, use.names = TRUE)
+      })
+      names(out) <- child_names
+      return(out)
+    }
+    
+    # case 3: mixed direct tables + nested lists
+    child_names <- unique(unlist(lapply(nested_lists, names)))
+    
+    out <- list()
+    
+    # keep flat tables under a main bucket
+    out[[main_name]] <- rbindlist(direct_tables, fill = TRUE, use.names = TRUE)
+    
+    # bind each nested child separately
+    for (nm in child_names) {
+      pieces <- lapply(nested_lists, function(x) x[[nm]])
+      pieces <- Filter(Negate(is.null), pieces)
+      out[[nm]] <- rbindlist(pieces, fill = TRUE, use.names = TRUE)
+    }
+    
+    out
+  }
+  
+  tab_names<-names(ghg_emissions_merge[[1]])
+  
+  ghg_emissions_merge_all <- lapply(tab_names, function(tab_name) {
+    print(tab_name)
+    x <- lapply(ghg_emissions_merge, `[[`, tab_name)
+    bind_mixed_tables(x)
+  })
+  
+  names(ghg_emissions_merge_all) <- tab_names
+  
     n<-nchar(names(ghg_emissions_merge_all))
     names(ghg_emissions_merge_all)[n>31]
     names(ghg_emissions_merge_all)[n>31]<-c("annual_N20N_soil_direct","annual_N20N_soil_indirect")
@@ -1067,10 +1120,13 @@ ef<-lapply(1:length(input_files),function(ii){
     }
     
     ## 4.2) Save and return results ####
-    saveWorkbook(wb, file = save_file, overwrite = TRUE)
-    jsonlite::write_json(ghg_emissions_merge_all,gsub(".xlsx",".json",save_file),simplifyVector=T)
+    excel_file<-gsub(".xlsx",paste0(" ", format(Sys.Date(), "%Y.%m.%d"),".xlsx"),save_file)
+    json_file<-gsub(".xlsx",paste0(" ", format(Sys.Date(), "%Y.%m.%d"),".json"),save_file)
     
-    cat("Output saved as:\n",save_file,"\n",gsub(".xlsx",".json",save_file),"\n")
+    saveWorkbook(wb, file = excel_file, overwrite = TRUE)
+    jsonlite::write_json(ghg_emissions_merge_all,json_file,simplifyVector=T)
+    
+    cat("Output saved as:\n",excel_file,"\n",json_file,"\n")
     
     result$input_file<-basename(input_files[ii])
     result_farm$input_file<-basename(input_files[ii])
